@@ -13,17 +13,11 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 
-LDLIBS=-lX11
-CC=gcc
-CFLAGS=-Wall
-INSTALL=install
+LDLIBS = -lX11 -lskarnet -lssh2
+CC = gcc
+CFLAGS = -Wall -Os
+LDFLAGS = -s
 
-xtrlock:	xtrlock.o
+xtrlock: xtrlock.o
 
-xtrlock.o:	xtrlock.c lock.bitmap mask.bitmap patchlevel.h
-
-install:	xtrlock
-		$(INSTALL) -c -m 755 xtrlock /usr/bin/X11
-
-install.man:
-		$(INSTALL) -c -m 644 xtrlock.man /usr/man/man1/xtrlock.1x
+xtrlock.o: xtrlock.c lock.bitmap mask.bitmap patchlevel.h

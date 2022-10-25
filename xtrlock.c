@@ -16,6 +16,11 @@
  * GNU General Public License for more details.
  */
 
+#include <arpa/inet.h>
+#include <libssh2.h>
+#include <skalibs/socket.h>
+#include <skalibs/strerr2.h>
+
 #include <X11/X.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -23,23 +28,17 @@
 #include <X11/Xos.h>
 
 #include <stdlib.h>
-#include <stdio.h>
 #include <sys/types.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <errno.h>
 #include <pwd.h>
-#include <grp.h>
 #include <limits.h>
 #include <string.h>
-#include <crypt.h>
 #include <unistd.h>
 #include <math.h>
 #include <ctype.h>
 #include <values.h>
-
-#ifdef SHADOW_PWD
-#include <shadow.h>
-#endif
 
 #ifdef MULTITOUCH
 #include <X11/extensions/XInput.h>
@@ -50,38 +49,62 @@
 #include "mask.bitmap"
 #include "patchlevel.h"
 
-Display *display;
-Window window, root;
+static char ipadr[sizeof(struct in6_addr)];
+const char *PROG;
+
+static Display *display;
+static Window window;
 
 #define TIMEOUTPERATTEMPT 30000
 #define MAXGOODWILL  (TIMEOUTPERATTEMPT*5)
 #define INITIALGOODWILL MAXGOODWILL
 #define GOODWILLPORTION 0.3
 
-struct passwd *pw;
-int passwordok(const char *s) {
-#if 0
-  char key[3];
-  char *encr;
+#define SSHPORT 22
 
-  key[0] = *(pw->pw_passwd);
-  key[1] =  (pw->pw_passwd)[1];
-  key[2] =  0;
-  encr = crypt(s, key);
-  return !strcmp(encr, pw->pw_passwd);
-#else
-  /* simpler, and should work with crypt() algorithms using longer
-     salt strings (like the md5-based one on freebsd).  --marekm */
-  return !strcmp(crypt(s, pw->pw_passwd), pw->pw_passwd);
-#endif
+static struct passwd *pw;
+
+static
+int passwordok(const char *s)
+{
+	int sock, ret = 0;
+	LIBSSH2_SESSION *session;
+	if (libssh2_init(0)) {
+		strerr_warnw1sys("libssh2_init");
+		return ret;
+	}
+	if ((sock = socket(AF_INET6, SOCK_STREAM, 0)) < 0) {
+		strerr_warnwu1sys("create socket");
+		return ret;
+	}
+	if (socket_connect6(sock, ipadr, SSHPORT)) {
+		strerr_warnwu1sys("connect to socket");
+		return ret;
+	}
+	if (!(session = libssh2_session_init())) {
+		strerr_warnwu1sys("initialize libssh2 session");
+		return ret;
+	}
+	if (libssh2_session_handshake(session, sock)) {
+		strerr_warn1sys("libssh2 handshake failed");
+		return ret;
+	}
+	ret = libssh2_userauth_password(session, pw->pw_name, s);
+	libssh2_session_disconnect(session, "xtrlock normal disconnect");
+	libssh2_session_free(session);
+	close(sock);
+	libssh2_exit();
+	return !ret;
 }
 
 #if MULTITOUCH
-XIEventMask evmask;
+static XIEventMask evmask;
 
 /* (Optimistically) attempt to grab multitouch devices which are not
  * intercepted via XGrabPointer. */
-void handle_multitouch(Cursor cursor) {
+static void
+handle_multitouch(Cursor cursor)
+{
   XIDeviceInfo *info;
   int xi_ndevices;
 
@@ -102,7 +125,12 @@ void handle_multitouch(Cursor cursor) {
 }
 #endif
 
-int main(int argc, char **argv){
+int
+main(int argc, char **argv)
+{
+  PROG = argv[0];
+  if (inet_pton(AF_INET6, "::1", ipadr) < 0)
+    strerr_dief1sys(1, "inet_pton");
   XEvent ev;
   KeySym ks;
   char cbuf[10], rbuf[128]; /* shadow appears to suggest 127 a good value here */
@@ -113,15 +141,12 @@ int main(int argc, char **argv){
   Pixmap csr_source,csr_mask;
   XColor csr_fg, csr_bg, dummy, black;
   int ret, screen, blank = 0, fork_after = 0;
-#ifdef SHADOW_PWD
-  struct spwd *sp;
-#endif
   struct timeval tv;
   int tvt, gs;
 
   if (getenv("WAYLAND_DISPLAY"))
-      fprintf(stderr,"WARNING: Wayland X server detected: xtrlock"
-         " cannot intercept all user input. See xtrlock(1).\n");
+	strerr_warnw1sys("Wayland X server detected: xtrlock"
+		" cannot intercept all user input. See xtrlock(1).");
 
   while (argc > 1) {
     if ((strcmp(argv[1], "-b") == 0)) {
@@ -132,58 +157,30 @@ int main(int argc, char **argv){
       fork_after = 1;
       argc--;
       argv++;
-    } else {
-      fprintf(stderr,"xtrlock (version %s); usage: xtrlock [-b] [-f]\n",
-              program_version);
-      exit(1);
-    }
+    } else
+		strerr_die3x(1, "xtrlock (version", program_version, ");"
+			" usage: xtrlock [-b] [-f]");
   }
 
-  errno=0;  pw= getpwuid(getuid());
-  if (!pw) { perror("password entry for uid not found"); exit(1); }
-#ifdef SHADOW_PWD
-  sp = getspnam(pw->pw_name);
-  if (sp)
-    pw->pw_passwd = sp->sp_pwdp;
-  endspent();
-#endif
-
-  /* logically, if we need to do the following then the same
-     applies to being installed setgid shadow.
-     we do this first, because of a bug in linux. --jdamery */
-  if (setgid(getgid())) { perror("setgid"); exit(1); }
-  /* we can be installed setuid root to support shadow passwords,
-     and we don't need root privileges any longer.  --marekm */
-  if (setuid(getuid())) { perror("setuid"); exit(1); }
-
-  if (strlen(pw->pw_passwd) < 13) {
-    fputs("password entry has no pwd\n",stderr); exit(1);
-  }
+  errno=0;
+  if (!(pw = getpwuid(getuid())))
+	strerr_diefu1sys(1, "determine user information");
 
   display= XOpenDisplay(0);
 
-  if (display==NULL) {
-    fprintf(stderr,"xtrlock (version %s): cannot open display\n",
-	    program_version);
-    exit(1);
-  }
+  if (display==NULL)
+	strerr_diefu1x(1, "open display");
 
 #ifdef MULTITOUCH
   unsigned char mask[XIMaskLen(XI_LASTEVENT)];
   int xi_major = 2, xi_minor = 2, xi_opcode, xi_error, xi_event;
 
-  if (!XQueryExtension(display, INAME, &xi_opcode, &xi_event, &xi_error)) {
-    fprintf(stderr, "xtrlock (version %s): No X Input extension\n",
-            program_version);
-    exit(1);
-  }
+  if (!XQueryExtension(display, INAME, &xi_opcode, &xi_event, &xi_error))
+	strerr_dief1x(1, "No X Input extension");
 
   if (XIQueryVersion(display, &xi_major, &xi_minor) != Success ||
-      xi_major * 10 + xi_minor < 22) {
-    fprintf(stderr,"xtrlock (version %s): Need XI 2.2\n",
-            program_version);
-    exit(1);
-  }
+      xi_major * 10 + xi_minor < 22)
+	strerr_dief1x(1, "Need XI 2.2");
 
   evmask.mask = mask;
   evmask.mask_len = sizeof(mask);
@@ -261,19 +258,14 @@ int main(int argc, char **argv){
     tv.tv_usec=10000;
     select(1,NULL,NULL,NULL,&tv);
   }
-  if (gs==0){
-    fprintf(stderr,"xtrlock (version %s): cannot grab keyboard\n",
-	    program_version);
-    exit(1);
-  }
+  if (gs==0)
+	strerr_diefu1x(1, "grab keyboard");
 
   if (XGrabPointer(display,window,False,(KeyPressMask|KeyReleaseMask)&0,
                GrabModeAsync,GrabModeAsync,None,
                cursor,CurrentTime)!=GrabSuccess) {
     XUngrabKeyboard(display,CurrentTime);
-    fprintf(stderr,"xtrlock (version %s): cannot grab pointer\n",
-	    program_version);
-    exit(1);
+    strerr_diefu1x(1, "grab pointer");
   }
 
 #ifdef MULTITOUCH
@@ -282,13 +274,10 @@ int main(int argc, char **argv){
 
   if (fork_after) {
     pid_t pid = fork();
-    if (pid < 0) {
-      fprintf(stderr,"xtrlock (version %s): cannot fork: %s\n",
-              program_version, strerror(errno));
-      exit(1);
-    } else if (pid > 0) {
+    if (pid < 0)
+		strerr_diefu1sys(1, "fork");
+    else if (pid > 0)
       exit(0);
-    }
   }
 
   for (;;) {
