@@ -1,0 +1,108 @@
+.\" Copyright (C) 1993, 1994 Ian Jackson
+.\" Copyright (C) 2022 Matt Boehlke
+.\"
+.\" Permission to use, copy, modify and distribute this software and its
+.\" documentation is granted under the terms of the GNU General Public
+.\" License, version 2 or later, as published by the Free Software
+.\" Foundation.
+.\"
+.\" This program is distributed in the hope that it will be useful, but
+.\" WITHOUT ANY WARRANTY; without even the implied warranty of
+.\" MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+.\" General Public License for more details.
+.\"
+.Dd $Mdocdate: October 24 2022 $
+.Dt XTRLOCK 1
+.Os
+.Sh NAME
+.Nm xtrlock
+.Nd Lock X display until password supplied, leaving windows visible
+.Sh SYNOPSIS
+.Nm
+.Op Fl b
+.Op Fl p Ar port
+.Sh DESCRIPTION
+.Nm
+locks the X server till the user enters their password at the keyboard.
+.Pp
+While
+.Nm
+is running, the mouse and keyboard are grabbed and the mouse cursor
+becomes a padlock.  Output displayed by X programs, and windows put up
+by new X clients, continue to be visible, and any new output is
+displayed normally.
+.Pp
+The mouse and keyboard are returned when the user types their
+password, followed by Enter or Newline.  If an incorrect password is
+entered the bell is sounded.  Pressing Backspace or Delete erases one
+character of a password partially typed; pressing Escape or Clear
+clears anything that has been entered.
+.Pp
+If too many attempts are made in too short a time further keystrokes
+generate bells and are otherwise ignored until a timeout has expired.
+.Pp
+The X server screen saver continues to operate normally; if it comes
+into operation the display may be restored by the usual means of
+touching a key (Shift, for example) or the mouse.
+.Sh IMPLEMENTATION NOTES
+This version of
+.Nm
+verifies the given password by using it to authenticate an SSH session with
+a server listening on the local host.
+Upon successful authentication,
+.Nm
+will release the mouse and keyboard.
+.Pp
+The rationale for this implemetation choice is to ensure that
+.Nm
+does not require any type of privilege escalation or access to the shadow
+database, and so that authentication can be performed in a portable way.
+The drawback is that your system must be running an SSH server that accepts
+password-based authentication.
+This server need not be listening on any other addresses than localhost,
+and can be listening on a non-standard port.
+If so, take note of the
+.Fl p
+option.
+.Pp
+Care should be taken, as
+.Nm
+does not perform any check as to whether a server is listening before locking
+the display.
+.Sh WARNING
+Due to limitations in the X11 protocol,
+.Nm
+cannot intercept all
+keyboard and mouse events if run under a Wayland-based desktop environment. In
+this situation, applications that use the "legacy" X11 protocol will be locked
+whilst ones supporting Wayland can still be interacted with, even when
+.Nm
+is in operation. Some keyboard shortcuts may also continue to function whilst
+the display is locked.
+.Pp
+A warning is printed if such an environment is detected. For an alternative
+solution, please see
+.Xr swaylock 1
+or similar.
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl b
+Blank the screen as well as displaying the padlock.
+.It Fl p Ar port
+Use
+.Ar port
+to connect to SSH server for user authentication. Default is 22.
+.El
+.Sh X RESOURCES, CONFIGURATION
+None.
+.Sh BUGS
+Additional input devices other than the keyboard and mouse are not
+disabled.
+.Pp
+The timeouts, bitmaps and mouse cursor colour cannot be modified.
+.Sh SEE ALSO
+.Xr X 1 , Xlib Documentation,
+.Xr libssh2_userauth_password 3
+.Sh AUTHORS
+.An Ian Jackson Ao Mt ian@chiark.greenend.org.uk Ac
+.An Matt Boehlke Po libssh2-based authentication Pc

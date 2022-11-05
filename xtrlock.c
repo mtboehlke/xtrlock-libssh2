@@ -18,6 +18,7 @@
 
 #include <arpa/inet.h>
 #include <libssh2.h>
+#include <skalibs/sgetopt.h>
 #include <skalibs/socket.h>
 #include <skalibs/strerr2.h>
 
@@ -27,11 +28,11 @@
 #include <X11/keysym.h>
 #include <X11/Xos.h>
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-#include <errno.h>
 #include <pwd.h>
 #include <limits.h>
 #include <string.h>
@@ -60,12 +61,25 @@ static Window window;
 #define INITIALGOODWILL MAXGOODWILL
 #define GOODWILLPORTION 0.3
 
+#ifndef SSHPORT
 #define SSHPORT 22
+#endif
 
 static struct passwd *pw;
 
-static
-int passwordok(const char *s)
+static long long
+estrtonum(const char *numstr, long long maxval)
+{
+	const char *errstr;
+	long long ll = strtonum(numstr, 0, maxval, &errstr);
+	if (errstr)
+		strerr_die4x(EXIT_FAILURE, "port number ", numstr, ": ", errstr);
+
+	return ll;
+}
+
+static int
+passwordok(const char *s, uint16_t port)
 {
 	int sock, ret = 0;
 	LIBSSH2_SESSION *session;
@@ -77,7 +91,7 @@ int passwordok(const char *s)
 		strerr_warnwu1sys("create socket");
 		return ret;
 	}
-	if (socket_connect6(sock, ipadr, SSHPORT)) {
+	if (socket_connect6(sock, ipadr, port)) {
 		strerr_warnwu1sys("connect to socket");
 		return ret;
 	}
@@ -126,11 +140,11 @@ handle_multitouch(Cursor cursor)
 #endif
 
 int
-main(int argc, char **argv)
+main(int argc, char const *const *argv)
 {
   PROG = argv[0];
   if (inet_pton(AF_INET6, "::1", ipadr) < 0)
-    strerr_dief1sys(1, "inet_pton");
+    strerr_dief1sys(EXIT_FAILURE, "inet_pton");
   XEvent ev;
   KeySym ks;
   char cbuf[10], rbuf[128]; /* shadow appears to suggest 127 a good value here */
@@ -140,47 +154,54 @@ main(int argc, char **argv)
   Cursor cursor;
   Pixmap csr_source,csr_mask;
   XColor csr_fg, csr_bg, dummy, black;
-  int ret, screen, blank = 0, fork_after = 0;
+  int ret, screen, blank = 0;
   struct timeval tv;
   int tvt, gs;
+  char const *portstr = 0;
 
   if (getenv("WAYLAND_DISPLAY"))
 	strerr_warnw1sys("Wayland X server detected: xtrlock"
 		" cannot intercept all user input. See xtrlock(1).");
 
-  while (argc > 1) {
-    if ((strcmp(argv[1], "-b") == 0)) {
-      blank = 1;
-      argc--;
-      argv++;
-    } else if ((strcmp(argv[1], "-f") == 0)) {
-      fork_after = 1;
-      argc--;
-      argv++;
-    } else
-		strerr_die3x(1, "xtrlock (version", program_version, ");"
-			" usage: xtrlock [-b] [-f]");
+  {	subgetopt l = SUBGETOPT_ZERO;
+	for (;;) {
+		int opt = subgetopt_r(argc, argv, "bp:", &l);
+		if (opt == -1)
+			break;
+		switch (opt) {
+		case 'b':
+			blank = 1;
+			break;
+		case 'p':
+			portstr = l.arg;
+			break;
+		default:
+			strerr_die3x(EXIT_FAILURE, "xtrlock (version ", program_version, ");"
+				" usage: xtrlock [-b] [-p port]");
+		}
+	}
+	argc -= l.ind ; argv +=l.ind ;
   }
+  const uint16_t sshport = portstr ? estrtonum(portstr, UINT16_MAX) : SSHPORT;
 
-  errno=0;
   if (!(pw = getpwuid(getuid())))
-	strerr_diefu1sys(1, "determine user information");
+	strerr_diefu1sys(EXIT_FAILURE, "determine user information");
 
   display= XOpenDisplay(0);
 
   if (display==NULL)
-	strerr_diefu1x(1, "open display");
+	strerr_diefu1x(EXIT_FAILURE, "open display");
 
 #ifdef MULTITOUCH
   unsigned char mask[XIMaskLen(XI_LASTEVENT)];
   int xi_major = 2, xi_minor = 2, xi_opcode, xi_error, xi_event;
 
   if (!XQueryExtension(display, INAME, &xi_opcode, &xi_event, &xi_error))
-	strerr_dief1x(1, "No X Input extension");
+	strerr_dief1x(EXIT_FAILURE, "No X Input extension");
 
   if (XIQueryVersion(display, &xi_major, &xi_minor) != Success ||
       xi_major * 10 + xi_minor < 22)
-	strerr_dief1x(1, "Need XI 2.2");
+	strerr_dief1x(EXIT_FAILURE, "Need XI 2.2");
 
   evmask.mask = mask;
   evmask.mask_len = sizeof(mask);
@@ -259,26 +280,18 @@ main(int argc, char **argv)
     select(1,NULL,NULL,NULL,&tv);
   }
   if (gs==0)
-	strerr_diefu1x(1, "grab keyboard");
+	strerr_diefu1x(EXIT_FAILURE, "grab keyboard");
 
   if (XGrabPointer(display,window,False,(KeyPressMask|KeyReleaseMask)&0,
                GrabModeAsync,GrabModeAsync,None,
                cursor,CurrentTime)!=GrabSuccess) {
     XUngrabKeyboard(display,CurrentTime);
-    strerr_diefu1x(1, "grab pointer");
+    strerr_diefu1x(EXIT_FAILURE, "grab pointer");
   }
 
 #ifdef MULTITOUCH
   handle_multitouch(cursor);
 #endif
-
-  if (fork_after) {
-    pid_t pid = fork();
-    if (pid < 0)
-		strerr_diefu1sys(1, "fork");
-    else if (pid > 0)
-      exit(0);
-  }
 
   for (;;) {
     XNextEvent(display,&ev);
@@ -295,7 +308,7 @@ main(int argc, char **argv)
       case XK_Linefeed: case XK_Return: case XK_KP_Enter:
         if (rlen==0) break;
         rbuf[rlen]=0;
-        if (passwordok(rbuf)) goto loop_x;
+        if (passwordok(rbuf, sshport)) goto loop_x;
         XBell(display,0);
         rlen= 0;
         if (timeout) {
@@ -331,6 +344,6 @@ main(int argc, char **argv)
       break;
     }
   }
- loop_x:
-  exit(0);
+loop_x:
+  exit(EXIT_SUCCESS);
 }
