@@ -1,0 +1,60 @@
+.Dd $Mdocdate: November 5 2022 $
+.Dt xtrlock-libssh2
+.Os
+.Sh NAME
+.Nm xtrlock
+.Nd Minimal X display lock program using SSH for password authentication
+.Sh Introduction
+This is a fork of the Debian maintained version of Ian Jackson's excellent
+.Nm .
+This version does not require the binary to be installed setuid or otherwise
+have elevated privileges. It does, however, require that an SSH server is
+listening for local connections.
+.Sh Details
+For more details on how
+.Nm
+grabs the input devices, see
+.Xr xtrlock 1 .
+.Pp
+For password authentication,
+.Nm
+uses the supplied password to attempt to authenticate an SSH session with a
+server listening on the local host. Upon successful authentication,
+.Nm
+will release the mouse and keyboard.
+.Sh Dependencies
+.Bl -bullet
+.It
+Xlib
+.It
+libssh2
+.It
+.Lk https://skarnet.org/software/skalibs skalibs
+.El
+.Sh Setup
+If you are already running an SSH server that accepts password authentication,
+no further setup is required. If your server does not allow password
+authentication, or you don't want to listen for SSH connections on the LAN,
+you can run a dedicated server that only listens for local connections on the
+port of your choice.
+For example, using the lightweight SSH server
+.Xr dropbear 8 :
+.Pp
+.Dl # dropbear -R -p localhost:port
+.Pp
+where port is a TCP port number.
+When invoking
+.Nm ,
+use
+.Fl p Ar port
+to use your port instead of the default 22.
+You can also change the default port used by
+.Nm
+at compile time by building with
+.Pp
+.Dl $ make CPPFLAGS=-DSSHPORT=port
+.Pp
+You could also use a lightweight super-server, e.g.
+.Xr s6-tcpserver 8
+together with dropbear in service program (inetd) mode:
+.Dl # s6-tcpserver ::1 port dropbear -R -i
