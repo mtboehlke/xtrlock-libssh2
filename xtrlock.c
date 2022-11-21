@@ -18,6 +18,7 @@
 
 #include <arpa/inet.h>
 #include <libssh2.h>
+#include <skalibs/djbunix.h>
 #include <skalibs/sgetopt.h>
 #include <skalibs/socket.h>
 #include <skalibs/strerr2.h>
@@ -31,7 +32,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <sys/types.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
 #include <pwd.h>
 #include <limits.h>
@@ -83,32 +83,31 @@ passwordok(const char *s, uint16_t port)
 {
 	int sock, ret = 0;
 	LIBSSH2_SESSION *session;
-	if (libssh2_init(0)) {
+	if (libssh2_init(0))
 		strerr_warnw1sys("libssh2_init");
-		return ret;
+	else {
+		if ((sock = socket_tcp6_b()) < 0)
+			strerr_warnwu1sys("create socket");
+		else {
+			if (socket_connect6(sock, ipadr, port))
+				strerr_warnwu1sys("connect to socket");
+			else {
+				if ((session = libssh2_session_init())) {
+					if (libssh2_session_handshake(session, sock))
+						strerr_warn1sys("libssh2 handshake failed");
+					else {
+						ret = !libssh2_userauth_password(session, pw->pw_name, s);
+						libssh2_session_disconnect(session, "xtrlock normal disconnect");
+					}
+					libssh2_session_free(session);
+				} else
+					strerr_warnwu1sys("initialize libssh2 session");
+			}
+			fd_close(sock);
+		}
+		libssh2_exit();
 	}
-	if ((sock = socket(AF_INET6, SOCK_STREAM, 0)) < 0) {
-		strerr_warnwu1sys("create socket");
-		return ret;
-	}
-	if (socket_connect6(sock, ipadr, port)) {
-		strerr_warnwu1sys("connect to socket");
-		return ret;
-	}
-	if (!(session = libssh2_session_init())) {
-		strerr_warnwu1sys("initialize libssh2 session");
-		return ret;
-	}
-	if (libssh2_session_handshake(session, sock)) {
-		strerr_warn1sys("libssh2 handshake failed");
-		return ret;
-	}
-	ret = libssh2_userauth_password(session, pw->pw_name, s);
-	libssh2_session_disconnect(session, "xtrlock normal disconnect");
-	libssh2_session_free(session);
-	close(sock);
-	libssh2_exit();
-	return !ret;
+	return ret;
 }
 
 #if MULTITOUCH
@@ -142,7 +141,7 @@ handle_multitouch(Cursor cursor)
 int
 main(int argc, char const *const *argv)
 {
-  PROG = argv[0];
+  PROG = argc > 0 ? argv[0] : "xtrlock";
   if (inet_pton(AF_INET6, "::1", ipadr) < 0)
     strerr_dief1sys(EXIT_FAILURE, "inet_pton");
   XEvent ev;
