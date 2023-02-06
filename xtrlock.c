@@ -21,7 +21,7 @@
 #include <skalibs/djbunix.h>
 #include <skalibs/sgetopt.h>
 #include <skalibs/socket.h>
-#include <skalibs/strerr2.h>
+#include <skalibs/strerr.h>
 
 #include <X11/X.h>
 #include <X11/Xlib.h>
@@ -73,7 +73,7 @@ estrtonum(const char *numstr, long long maxval)
 	const char *errstr;
 	long long ll = strtonum(numstr, 0, maxval, &errstr);
 	if (errstr)
-		strerr_die4x(EXIT_FAILURE, "port number ", numstr, ": ", errstr);
+		strerr_die(EXIT_FAILURE, "port number ", numstr, ": ", errstr);
 
 	return ll;
 }
@@ -84,24 +84,24 @@ passwordok(const char *s, uint16_t port)
 	int sock, ret = 0;
 	LIBSSH2_SESSION *session;
 	if (libssh2_init(0))
-		strerr_warnw1sys("libssh2_init");
+		strerr_warnwnsys(1, "libssh2_init");
 	else {
 		if ((sock = socket_tcp6_b()) < 0)
-			strerr_warnwu1sys("create socket");
+			strerr_warnwunsys(1, "create socket");
 		else {
 			if (socket_connect6(sock, ipadr, port))
-				strerr_warnwu1sys("connect to socket");
+				strerr_warnwunsys(1, "connect to socket");
 			else {
 				if ((session = libssh2_session_init())) {
 					if (libssh2_session_handshake(session, sock))
-						strerr_warn1sys("libssh2 handshake failed");
+						strerr_warnwnsys(1, "libssh2 handshake failed");
 					else {
 						ret = !libssh2_userauth_password(session, pw->pw_name, s);
 						libssh2_session_disconnect(session, "xtrlock normal disconnect");
 					}
 					libssh2_session_free(session);
 				} else
-					strerr_warnwu1sys("initialize libssh2 session");
+					strerr_warnwunsys(1, "initialize libssh2 session");
 			}
 			fd_close(sock);
 		}
@@ -143,7 +143,7 @@ main(int argc, char const *const *argv)
 {
   PROG = argc > 0 ? argv[0] : "xtrlock";
   if (inet_pton(AF_INET6, "::1", ipadr) < 0)
-    strerr_dief1sys(EXIT_FAILURE, "inet_pton");
+    strerr_diefnsys(EXIT_FAILURE, 1, "inet_pton");
   XEvent ev;
   KeySym ks;
   char cbuf[10], rbuf[128]; /* shadow appears to suggest 127 a good value here */
@@ -159,7 +159,7 @@ main(int argc, char const *const *argv)
   char const *portstr = 0;
 
   if (getenv("WAYLAND_DISPLAY"))
-	strerr_warnw1sys("Wayland X server detected: xtrlock"
+	strerr_warnwn(1, "Wayland X server detected: xtrlock"
 		" cannot intercept all user input. See xtrlock(1).");
 
   {	subgetopt l = SUBGETOPT_ZERO;
@@ -175,7 +175,7 @@ main(int argc, char const *const *argv)
 			portstr = l.arg;
 			break;
 		default:
-			strerr_die3x(EXIT_FAILURE, "xtrlock (version ", program_version, ");"
+			strerr_die(EXIT_FAILURE, "xtrlock (version ", program_version, ");"
 				" usage: xtrlock [-b] [-p port]");
 		}
 	}
@@ -184,23 +184,23 @@ main(int argc, char const *const *argv)
   const uint16_t sshport = portstr ? estrtonum(portstr, UINT16_MAX) : SSHPORT;
 
   if (!(pw = getpwuid(getuid())))
-	strerr_diefu1sys(EXIT_FAILURE, "determine user information");
+	strerr_diefunsys(EXIT_FAILURE, 1, "determine user information");
 
   display= XOpenDisplay(0);
 
   if (display==NULL)
-	strerr_diefu1x(EXIT_FAILURE, "open display");
+	strerr_diefun(EXIT_FAILURE, 1, "open display");
 
 #ifdef MULTITOUCH
   unsigned char mask[XIMaskLen(XI_LASTEVENT)];
   int xi_major = 2, xi_minor = 2, xi_opcode, xi_error, xi_event;
 
   if (!XQueryExtension(display, INAME, &xi_opcode, &xi_event, &xi_error))
-	strerr_dief1x(EXIT_FAILURE, "No X Input extension");
+	strerr_diefn(EXIT_FAILURE, 1, "No X Input extension");
 
   if (XIQueryVersion(display, &xi_major, &xi_minor) != Success ||
       xi_major * 10 + xi_minor < 22)
-	strerr_dief1x(EXIT_FAILURE, "Need XI 2.2");
+	strerr_diefn(EXIT_FAILURE, 1, "Need XI 2.2");
 
   evmask.mask = mask;
   evmask.mask_len = sizeof(mask);
@@ -279,13 +279,13 @@ main(int argc, char const *const *argv)
     select(1,NULL,NULL,NULL,&tv);
   }
   if (gs==0)
-	strerr_diefu1x(EXIT_FAILURE, "grab keyboard");
+	strerr_diefun(EXIT_FAILURE, 1, "grab keyboard");
 
   if (XGrabPointer(display,window,False,(KeyPressMask|KeyReleaseMask)&0,
                GrabModeAsync,GrabModeAsync,None,
                cursor,CurrentTime)!=GrabSuccess) {
     XUngrabKeyboard(display,CurrentTime);
-    strerr_diefu1x(EXIT_FAILURE, "grab pointer");
+    strerr_diefun(EXIT_FAILURE, 1, "grab pointer");
   }
 
 #ifdef MULTITOUCH

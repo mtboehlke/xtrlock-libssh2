@@ -18,7 +18,7 @@ For password authentication, **xtrlock** uses the supplied password to attempt t
 
 * libssh2
 
-* [skalibs](https://skarnet.org/software/skalibs)
+* [skalibs](https://skarnet.org/software/skalibs) &gt;= 2.13.0.0
 
 ### Setup
 
