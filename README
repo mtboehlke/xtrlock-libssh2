@@ -21,7 +21,7 @@ Dependencies
 
      -   libssh2
 
-     -   skalibs: https://skarnet.org/software/skalibs
+     -   skalibs >= 2.13.0.0: https://skarnet.org/software/skalibs
 
 Setup
      If you are already running an SSH server that accepts password
@@ -41,4 +41,5 @@ Setup
 
      You could also use a lightweight super-server, e.g.  s6-tcpserver(8)
      together with dropbear in service program (inetd) mode:
+
            # s6-tcpserver ::1 port dropbear -R -i

@@ -1,4 +1,4 @@
-.Dd $Mdocdate: November 5 2022 $
+.Dd $Mdocdate: February 5 2023 $
 .Dt xtrlock-libssh2
 .Os
 .Sh NAME
@@ -29,7 +29,7 @@ Xlib
 .It
 libssh2
 .It
-.Lk https://skarnet.org/software/skalibs skalibs
+.Lk https://skarnet.org/software/skalibs skalibs >= 2.13.0.0
 .El
 .Sh Setup
 If you are already running an SSH server that accepts password authentication,
@@ -57,4 +57,6 @@ at compile time by building with
 You could also use a lightweight super-server, e.g.
 .Xr s6-tcpserver 8
 together with dropbear in service program (inetd) mode:
+.Pp
 .Dl # s6-tcpserver ::1 port dropbear -R -i
+.Pp
