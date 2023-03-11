@@ -83,30 +83,35 @@ passwordok(const char *s, uint16_t port)
 {
 	int sock, ret = 0;
 	LIBSSH2_SESSION *session;
-	if (libssh2_init(0))
+	if (libssh2_init(0)) {
 		strerr_warnwnsys(1, "libssh2_init");
-	else {
-		if ((sock = socket_tcp6_b()) < 0)
-			strerr_warnwunsys(1, "create socket");
-		else {
-			if (socket_connect6(sock, ipadr, port))
-				strerr_warnwunsys(1, "connect to socket");
-			else {
-				if ((session = libssh2_session_init())) {
-					if (libssh2_session_handshake(session, sock))
-						strerr_warnwnsys(1, "libssh2 handshake failed");
-					else {
-						ret = !libssh2_userauth_password(session, pw->pw_name, s);
-						libssh2_session_disconnect(session, "xtrlock normal disconnect");
-					}
-					libssh2_session_free(session);
-				} else
-					strerr_warnwunsys(1, "initialize libssh2 session");
-			}
-			fd_close(sock);
-		}
-		libssh2_exit();
+		return ret;
 	}
+	if ((sock = socket_tcp6_b()) < 0) {
+		strerr_warnwunsys(1, "create socket");
+		goto clean1;
+	}
+	if (socket_connect6(sock, ipadr, port)) {
+		strerr_warnwunsys(1, "connect to socket");
+		goto clean2;
+	}
+	if (!(session = libssh2_session_init())) {
+		strerr_warnwunsys(1, "initialize libssh2 session");
+		goto clean2;
+	}
+	if (libssh2_session_handshake(session, sock)) {
+		strerr_warnwnsys(1, "libssh2 handshake failed");
+		goto clean3;
+	}
+	ret = !libssh2_userauth_password(session, pw->pw_name, s);
+	libssh2_session_disconnect(session, "xtrlock normal disconnect");
+clean3:
+	libssh2_session_free(session);
+clean2:
+	fd_close(sock);
+clean1:
+	libssh2_exit();
+
 	return ret;
 }
 
